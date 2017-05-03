@@ -4,6 +4,7 @@ require 'CGI'
 require 'rubygems'
 require 'pp'
 require 'jira-ruby'
+require 'pry'
 #globals
 $pid = 10707
 $teamid = 14302 #Modules team
@@ -26,16 +27,16 @@ def get_client()
                 :password => password,
                 #:site     => 'http://127.0.0.1:2990', #local site
                 #TODO change this when ready for prime time
-                :site   => "https://jira1-test.ops.puppetlabs.net",
+                :site   => "https://tickets.puppetlabs.com",
                 :context_path => '',
                 :auth_type => :basic,
                 :ssl_verify_mode =>OpenSSL::SSL::VERIFY_NONE ,
-                #:use_ssl => false, 
+                #:use_ssl => false,
                 :read_timeout => 120
             }
 
     client = JIRA::Client.new(options)
-    return client  
+    return client
 end
 
 def get_custom_issues_url(module_name)
@@ -47,12 +48,11 @@ def get_supported_modules()
     response = HTTParty.get("https://forgeapi.puppet.com/v3/modules?endorsements=supported&limit=1000&module_groups=base+pe_only")
 
     json = JSON.parse(response.body)
-    
+
     return json
 end
 
 def list_projects_on_jira()
-    
 
     client = get_client()
 
@@ -67,7 +67,8 @@ end
 def create_supported_module_update_tickets()
    supported_modules = get_supported_modules()
    client = get_client()
-   supported_modules["results"].take(1).each do |child|
+   supported_modules["results"].each do |child|
+     if child["slug"] =~ /puppetlabs/
         issue = client.Issue.build
         requirements =  child["current_release"]["metadata"]["requirements"]
         source = child["current_release"]["metadata"]["source"]
@@ -77,30 +78,31 @@ def create_supported_module_update_tickets()
             version_requirement =  requirements[0]["version_requirement"]
         end
 
-        if version_requirement == $version_requirement
-            return; #The version requirement has already been updated   
+        unless version_requirement == ">= 4.7.0 < 5.0.0"
+          issue_json = {
+              "fields" => {
+                  #This call below doesn't work.  It has to be called out in a separate save
+                  #"customfield_10006"=> "MODULES-4694",
+                  "summary"=>"#{$summary}" % child["slug"],
+                  "description"=>"#{$description}" % [child["slug"], version_requirement, source, project_page, get_custom_issues_url(child["slug"])],
+                  "customfield_14200" =>{"id"=>"#{$teamid}"},
+                  "project"=>{"id"=>"#{$pid}"},
+                  "issuetype"=>{"id"=>"3"},
+                  "labels"=>["puppethack", "beginner"]
+
+              }
+          }
+          issue.save(issue_json)
+
+          issue.fetch
+          #Separate call to save the custom field.  Adding it to the original json fails
+          #TODO - change this when moving to production
+          issue.save({"fields"=>{"customfield_10006"=>"MODULES-4820"}})
+          # pp issue.fields['summary']
+          puts "Ticket created for #{child["slug"]}"
         end
-        issue_json = { 
-            "fields" => {
-                #This call below doesn't work.  It has to be called out in a separate save
-                #"customfield_10006"=> "MODULES-4694",
-                "summary"=>"#{$summary}" % child["slug"],
-                "description"=>"#{$description}" % [child["slug"], version_requirement, source, project_page, get_custom_issues_url(child["slug"])],
-                "customfield_14200" =>{"id"=>"#{$teamid}"},
-                "project"=>{"id"=>"#{$pid}"},
-                "issuetype"=>{"id"=>"3"},
-                "labels"=>["puppethack", "beginner"]
-                
-            }
-        }
-        issue.save(issue_json)
-        
-        issue.fetch
-        #Separate call to save the custom field.  Adding it to the original json fails
-        #TODO - change this when moving to production
-        issue.save({"fields"=>{"customfield_10006"=>"MODULES-4694"}})
-        pp issue.fields['summary']
     end
+  end
 end
 
 #Test Issue Creation
@@ -108,7 +110,7 @@ def create_test_issue()
     client = get_client()
     issue = client.Issue.build
     #issue.save({"fields"=>{"summary"=>"#{$summary}","description"=>"#{$description}","customfield_14200" =>{"id"=>"#{$teamid}"},"project"=>{"id"=>"#{$pid}"},"issuetype"=>{"id"=>"3"}}})
-    issue_json = { 
+    issue_json = {
         "fields" => {
             "summary"=>"#{$summary}" % child["slug"],
             "description"=>"#{$description}" % [child["slug"], child["current_release"]["metadata"]["requirements"]],
@@ -137,5 +139,6 @@ end
 #create_test_issue()
 #delete_all_issues()
 
-create_supported_module_update_tickets()
+create_supported_module_update_tickets
 #list_specific_issue()
+

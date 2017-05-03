@@ -97,6 +97,7 @@ def create_supported_module_update_tickets()
         
         issue.fetch
         #Separate call to save the custom field.  Adding it to the original json fails
+        #TODO - change this when moving to production
         issue.save({"fields"=>{"customfield_10006"=>"MODULES-4694"}})
         pp issue.fields['summary']
     end
